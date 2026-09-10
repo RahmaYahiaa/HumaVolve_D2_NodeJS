@@ -1,6 +1,8 @@
 const User = require('../models/User');
 const { generateAccessToken, generateRefreshToken } = require('../utils/generateTokens');
 const jwt = require('jsonwebtoken');
+const AppError = require('../utils/AppError');
+const asyncHandler = require('../middleware/asyncHandler');
 
 const accessTokenCookieOptions = {
   httpOnly: true,
@@ -16,92 +18,69 @@ const refreshTokenCookieOptions = {
   maxAge: 7 * 24 * 60 * 60 * 1000,
 };
 
-async function register(req, res) {
-  try {
-    const { name, email, password } = req.body;
+const register = asyncHandler(async (req, res, next) => {
+  const { name, email, password } = req.body;
 
-    const user = await User.create({ name, email, password });
+  const user = await User.create({ name, email, password });
 
-    const accessToken = generateAccessToken(user._id);
-    const refreshToken = generateRefreshToken(user._id);
+  const accessToken = generateAccessToken(user._id);
+  const refreshToken = generateRefreshToken(user._id);
 
-    res.cookie('accessToken', accessToken, accessTokenCookieOptions);
-    res.cookie('refreshToken', refreshToken, refreshTokenCookieOptions);
+  res.cookie('accessToken', accessToken, accessTokenCookieOptions);
+  res.cookie('refreshToken', refreshToken, refreshTokenCookieOptions);
 
-    res.status(201).json({ success: true, data: user });
-  } catch (err) {
-    if (err.code === 11000) {
-      return res.status(409).json({ success: false, message: 'Email already exists' });
-    }
-    res.status(500).json({ success: false, message: err.message });
+  res.status(201).json({ success: true, data: user });
+});
+
+const login = asyncHandler(async (req, res, next) => {
+  const { email, password } = req.body;
+
+  if (!email || !password) {
+    return next(new AppError('Email and password are required', 400));
   }
-}
 
-async function login(req, res) {
-  try {
-    const { email, password } = req.body;
+  const user = await User.findOne({ email });
 
-    if (!email || !password) {
-      return res.status(400).json({ success: false, message: 'Email and password are required' });
-    }
-
-    const user = await User.findOne({ email });
-
-    if (!user) {
-      return res.status(401).json({ success: false, message: 'Invalid email or password' });
-    }
-
-    const isMatch = await user.comparePassword(password);
-
-    if (!isMatch) {
-      return res.status(401).json({ success: false, message: 'Invalid email or password' });
-    }
-
-    const accessToken = generateAccessToken(user._id);
-    const refreshToken = generateRefreshToken(user._id);
-
-    res.cookie('accessToken', accessToken, accessTokenCookieOptions);
-    res.cookie('refreshToken', refreshToken, refreshTokenCookieOptions);
-
-    res.status(200).json({ success: true, data: user });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+  if (!user) {
+    return next(new AppError('Invalid email or password', 401));
   }
-}
 
-async function refreshToken(req, res) {
-  try {
-    const token = req.cookies.refreshToken;
+  const isMatch = await user.comparePassword(password);
 
-    if (!token) {
-      return res.status(401).json({ success: false, message: 'Refresh token not found' });
-    }
-
-    let decoded;
-    try {
-      decoded = jwt.verify(token, process.env.JWT_REFRESH_SECRET);
-    } catch (err) {
-      if (err.name === 'TokenExpiredError') {
-        return res.status(401).json({ success: false, message: 'Refresh token expired' });
-      }
-      return res.status(403).json({ success: false, message: 'Invalid refresh token' });
-    }
-
-    const user = await User.findById(decoded.id);
-
-    if (!user) {
-      return res.status(404).json({ success: false, message: 'User not found' });
-    }
-
-    const newAccessToken = generateAccessToken(user._id);
-
-    res.cookie('accessToken', newAccessToken, accessTokenCookieOptions);
-
-    res.status(200).json({ success: true, message: 'Access token refreshed' });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+  if (!isMatch) {
+    return next(new AppError('Invalid email or password', 401));
   }
-}
+
+  const accessToken = generateAccessToken(user._id);
+  const refreshToken = generateRefreshToken(user._id);
+
+  res.cookie('accessToken', accessToken, accessTokenCookieOptions);
+  res.cookie('refreshToken', refreshToken, refreshTokenCookieOptions);
+
+  res.status(200).json({ success: true, data: user });
+});
+
+const refreshToken = asyncHandler(async (req, res, next) => {
+  const token = req.cookies.refreshToken;
+
+  if (!token) {
+    return next(new AppError('Refresh token not found', 401));
+  }
+
+  const decoded = jwt.verify(token, process.env.JWT_REFRESH_SECRET);
+
+  const user = await User.findById(decoded.id);
+
+  if (!user) {
+    return next(new AppError('User not found', 404));
+  }
+
+  const newAccessToken = generateAccessToken(user._id);
+
+  res.cookie('accessToken', newAccessToken, accessTokenCookieOptions);
+
+  res.status(200).json({ success: true, message: 'Access token refreshed' });
+});
 
 function logout(req, res) {
   res.clearCookie('accessToken', accessTokenCookieOptions);
