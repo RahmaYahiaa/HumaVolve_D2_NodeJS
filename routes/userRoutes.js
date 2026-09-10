@@ -9,9 +9,11 @@ const {
   deleteUser,
 } = require('../controllers/userController');
 
+const validateUserInput = require('../middleware/validateUser');
+
 router.get('/', getAllUsers);
 router.get('/:id', getUserById);
-router.post('/', createUser);
+router.post('/', validateUserInput, createUser);
 router.put('/:id', updateUser);
 router.delete('/:id', deleteUser);
 
